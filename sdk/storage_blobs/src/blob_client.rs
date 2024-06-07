@@ -5,21 +5,22 @@ use azure_core::{
 use azure_identity::create_credential;
 use std::sync::Arc;
 
-pub struct BlobClient {
-    account_name: String,
+pub struct BlobClient<'a> {
+    // At the moment, we aren't really using this for anything so comes up as "dead fields"
+    account_name: &'a str,
     credential: Arc<dyn TokenCredential>,
-    container_name: String,
-    blob_name: String,
+    container_name: &'a str,
+    blob_name: &'a str,
     url: Url,
     pipeline: Pipeline,
 }
 
-impl BlobClient {
+impl<'a> BlobClient<'a> {
     pub fn new(
-        account_name: String,
-        credential: String,
-        container_name: String,
-        blob_name: String,
+        account_name: &'a str,
+        credential: &'a str,
+        container_name: &'a str,
+        blob_name: &'a str,
     ) -> Self {
         // Create Respective Authentication Pipeline
 
@@ -51,7 +52,7 @@ impl BlobClient {
         // Build our BlobClient
         Self {
             account_name: account_name,
-            credential: credential.clone(), // Unsure if clone is the correct move here
+            credential: credential,
             container_name: container_name,
             blob_name: blob_name,
             url: Url::parse(&blob_url).expect("Something went wrong with URL parsing!"),
@@ -106,10 +107,10 @@ mod tests {
     async fn test_download_blob() {
         // Create a Blob Client
         let my_blob_client = BlobClient::new(
-            "vincenttranstock".to_string(),
-            "throwaway".to_string(),
-            "acontainer108f32e8".to_string(),
-            "hello.txt".to_string(),
+            "vincenttranstock",
+            "throwaway",
+            "acontainer108f32e8",
+            "hello.txt",
         );
 
         // Assert equality
@@ -120,10 +121,10 @@ mod tests {
     async fn test_get_blob_properties() {
         // Create a Blob Client
         let my_blob_client = BlobClient::new(
-            "vincenttranstock".to_string(),
-            "throwaway".to_string(),
-            "acontainer108f32e8".to_string(),
-            "hello.txt".to_string(),
+            "vincenttranstock",
+            "throwaway",
+            "acontainer108f32e8",
+            "hello.txt",
         );
 
         // Get response

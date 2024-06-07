@@ -6,16 +6,17 @@ use azure_core::{
 };
 use azure_identity::create_credential;
 
-pub struct BlobContainerClient {
-    account_name: String,
+pub struct BlobContainerClient<'a> {
+    // At the moment, we aren't really using this for anything so comes up as "dead fields"
+    account_name: &'a str,
     credential: Arc<dyn TokenCredential>,
-    container_name: String,
+    container_name: &'a str,
     url: Url,
     pipeline: Pipeline,
 }
 
-impl BlobContainerClient {
-    pub fn new(account_name: String, credential: String, container_name: String) -> Self {
+impl<'a> BlobContainerClient<'a> {
+    pub fn new(account_name: &'a str, credential: &'a str, container_name: &'a str) -> Self {
         // Create Respective Authentication Pipeline
 
         // OAuth Pipeline Policy
@@ -45,7 +46,7 @@ impl BlobContainerClient {
         // Build our BlobContainerClient
         Self {
             account_name: account_name,
-            credential: credential.clone(), // Unsure if clone is the correct move here
+            credential: credential,
             container_name: container_name,
             url: Url::parse(&blob_url).expect("Something went wrong with URL parsing!"),
             pipeline: runner_pipeline,
@@ -81,11 +82,8 @@ mod tests {
     #[tokio::test]
     async fn test_get_container_properties() {
         // Create a Container Client
-        let my_blob_container_client = BlobContainerClient::new(
-            "vincenttranstock".to_string(),
-            "throwaway".to_string(),
-            "acontainer108f32e8".to_string(),
-        );
+        let my_blob_container_client =
+            BlobContainerClient::new("vincenttranstock", "throwaway", "acontainer108f32e8");
 
         // Get response
         let ret = my_blob_container_client.get_container_properties().await;
