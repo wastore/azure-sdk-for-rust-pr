@@ -1,3 +1,4 @@
+pub mod base_client;
 pub mod blob_client;
 pub mod blob_container_client;
 pub mod blob_service_client;

@@ -1,10 +1,6 @@
-use azure_core::{
-    auth::TokenCredential, policies::BearerTokenCredentialPolicy, ClientOptions, Context, Header,
-    Method, Pipeline, Policy, Request, Response, Url,
-};
-use azure_identity::create_credential;
+use crate::base_client::BaseClient;
+use azure_core::{auth::TokenCredential, Context, Method, Pipeline, Request, Response, Url};
 use std::sync::Arc;
-
 pub struct BlobClient {
     account_name: String,
     credential: Arc<dyn TokenCredential>,
@@ -14,6 +10,9 @@ pub struct BlobClient {
     pipeline: Pipeline,
 }
 
+// Even just this empty block will give us access to BaseClient's traits
+impl BaseClient for BlobClient {}
+
 impl BlobClient {
     pub fn new(
         account_name: String,
@@ -21,54 +20,36 @@ impl BlobClient {
         container_name: String,
         blob_name: String,
     ) -> Self {
-        // Create Respective Authentication Pipeline
-
-        // OAuth Pipeline Policy
-        println!("Auth type chosen, Oauth, {}", credential);
-        let credential = create_credential().expect("Failed for some reason?");
-        let oauth_token_policy = BearerTokenCredentialPolicy::new(
-            credential.clone(),
-            &["https://storage.azure.com/.default"],
+        // Build BlobClient-specific URL
+        let blob_url = BlobClient::build_blob_url(
+            &BlobClient::build_url(&account_name, "blob"),
+            &container_name,
+            &blob_name,
         );
 
-        // Runner Pipeline
-        let runner_pipeline = Pipeline::new(
-            option_env!("CARGO_PKG_NAME"),
-            option_env!("CARGO_PKG_VERSION"),
-            ClientOptions::default(),
-            vec![Arc::new(oauth_token_policy) as Arc<dyn Policy>],
-            Vec::new(),
-        );
-
-        // Build URL from Input (No validation atm)
-        let blob_url = "https://".to_owned()
-            + &account_name
-            + ".blob.core.windows.net/"
-            + &container_name
-            + "/"
-            + &blob_name;
+        // Get Credential Object
+        let credential = BlobClient::get_credential();
 
         // Build our BlobClient
         Self {
             account_name: account_name,
-            credential: credential.clone(), // Unsure if clone is the correct move here
+            credential: credential.clone(),
             container_name: container_name,
             blob_name: blob_name,
             url: Url::parse(&blob_url).expect("Something went wrong with URL parsing!"),
-            pipeline: runner_pipeline,
+            pipeline: BlobClient::build_pipeline(credential),
         }
     }
 
-    // For now, this will handle the x-ms-version issue
-    fn finalize_request(mut request: Request) -> Request {
-        request.insert_header("x-ms-version", "2023-11-03");
-        request
+    // This will handle appending container and blob name
+    fn build_blob_url(base_url: &str, container_name: &str, blob_name: &str) -> String {
+        base_url.to_owned() + container_name + "/" + blob_name
     }
 
     pub async fn download_blob(&self) -> String {
         // Build the download request itself
         let mut request = Request::new(self.url.to_owned(), Method::Get); // This is technically cloning
-        request = BlobClient::finalize_request(request);
+        BlobClient::finalize_request(&mut request);
 
         // Send the request
         let response = self.pipeline.send(&(Context::new()), &mut request).await;
@@ -85,7 +66,7 @@ impl BlobClient {
     pub async fn get_blob_properties(&self) -> Response {
         // Build the get properties request itself
         let mut request = Request::new(self.url.to_owned(), Method::Head); // This is technically cloning
-        request = BlobClient::finalize_request(request);
+        BlobClient::finalize_request(&mut request);
 
         // Send the request
         let response = self.pipeline.send(&(Context::new()), &mut request).await;
