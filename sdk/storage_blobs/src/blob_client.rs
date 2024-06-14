@@ -1,6 +1,7 @@
-use crate::base_client::BaseClient;
+use crate::{base_client::BaseClient, BlobClientOptions};
 use azure_core::{auth::TokenCredential, Context, Method, Pipeline, Request, Response, Url};
 use std::sync::Arc;
+
 pub struct BlobClient {
     account_name: String,
     credential: Arc<dyn TokenCredential>,
@@ -8,6 +9,7 @@ pub struct BlobClient {
     blob_name: String,
     url: Url,
     pipeline: Pipeline,
+    options: Option<BlobClientOptions>,
 }
 
 // Even just this empty block will give us access to BaseClient's traits
@@ -16,9 +18,10 @@ impl BaseClient for BlobClient {}
 impl BlobClient {
     pub fn new(
         account_name: String,
-        credential: String,
         container_name: String,
         blob_name: String,
+        credential: Arc<dyn TokenCredential>,
+        options: Option<BlobClientOptions>,
     ) -> Self {
         // Build BlobClient-specific URL
         let blob_url = BlobClient::build_blob_url(
@@ -27,17 +30,15 @@ impl BlobClient {
             &blob_name,
         );
 
-        // Get Credential Object
-        let credential = BlobClient::get_credential();
-
         // Build our BlobClient
         Self {
             account_name: account_name,
-            credential: credential.clone(),
+            credential: Arc::clone(&credential),
             container_name: container_name,
             blob_name: blob_name,
             url: Url::parse(&blob_url).expect("Something went wrong with URL parsing!"),
             pipeline: BlobClient::build_pipeline(credential),
+            options: options.clone(),
         }
     }
 
@@ -79,18 +80,24 @@ impl BlobClient {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use azure_core::headers::HeaderName;
-
-    use crate::BlobClient;
+    use azure_identity::DefaultAzureCredentialBuilder;
 
     #[tokio::test]
     async fn test_download_blob() {
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
         // Create a Blob Client
         let my_blob_client = BlobClient::new(
-            "vincenttranstock".to_string(),
-            "throwaway".to_string(),
-            "acontainer108f32e8".to_string(),
-            "hello.txt".to_string(),
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            String::from("hello.txt"),
+            credential,
+            Some(BlobClientOptions::default()),
         );
 
         // Assert equality
@@ -99,17 +106,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_get_blob_properties() {
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
         // Create a Blob Client
         let my_blob_client = BlobClient::new(
-            "vincenttranstock".to_string(),
-            "throwaway".to_string(),
-            "acontainer108f32e8".to_string(),
-            "hello.txt".to_string(),
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            String::from("hello.txt"),
+            credential,
+            Some(BlobClientOptions::default()),
         );
 
         // Get response
         let ret = my_blob_client.get_blob_properties().await;
-        let (status_code, headers, response_body) = ret.deconstruct();
+        let (status_code, headers, _response_body) = ret.deconstruct();
 
         // Assert equality
         assert_eq!(status_code, azure_core::StatusCode::Ok);

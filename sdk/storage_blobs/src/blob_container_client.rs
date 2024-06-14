@@ -16,20 +16,21 @@ pub struct BlobContainerClient {
 impl BaseClient for BlobContainerClient {}
 
 impl BlobContainerClient {
-    pub fn new(account_name: String, credential: String, container_name: String) -> Self {
+    pub fn new(
+        account_name: String,
+        container_name: String,
+        credential: Arc<dyn TokenCredential>,
+    ) -> Self {
         // Build ContainerClient-specific URL
         let container_url = BlobContainerClient::build_container_url(
             &BlobContainerClient::build_url(&account_name, "blob"),
             &container_name,
         );
 
-        // Get Credential Object
-        let credential = BlobContainerClient::get_credential();
-
         // Build our BlobContainerClient
         Self {
             account_name: account_name,
-            credential: credential.clone(), // Unsure if clone is the correct move here
+            credential: Arc::clone(&credential),
             container_name: container_name,
             url: Url::parse(&container_url).expect("Something went wrong with URL parsing!"),
             pipeline: BlobContainerClient::build_pipeline(credential),
@@ -57,17 +58,22 @@ impl BlobContainerClient {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use azure_core::headers::HeaderName;
-
-    use crate::BlobContainerClient;
+    use azure_identity::DefaultAzureCredentialBuilder;
 
     #[tokio::test]
     async fn test_get_container_properties() {
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
         // Create a Container Client
         let my_blob_container_client = BlobContainerClient::new(
-            "vincenttranstock".to_string(),
-            "throwaway".to_string(),
-            "acontainer108f32e8".to_string(),
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            credential,
         );
 
         // Get response

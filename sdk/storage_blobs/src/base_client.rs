@@ -6,11 +6,6 @@ use azure_identity::create_credential;
 use std::sync::Arc;
 
 pub(crate) trait BaseClient {
-    fn get_credential() -> Arc<dyn TokenCredential> {
-        let credential = create_credential().expect("Failed for some reason?");
-        credential
-    }
-
     fn build_pipeline(credential: Arc<dyn TokenCredential>) -> Pipeline {
         let oauth_token_policy =
             BearerTokenCredentialPolicy::new(credential, &["https://storage.azure.com/.default"]);
