@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use azure_core::{auth::TokenCredential, Context, Method, Pipeline, Request, Response, Url};
+use azure_core::{
+    auth::TokenCredential, ClientOptions, Context, Method, Pipeline, Request, Response, Url,
+};
 
 use crate::base_client::BaseClient;
 
@@ -33,7 +35,7 @@ impl BlobContainerClient {
             credential: Arc::clone(&credential),
             container_name: container_name,
             url: Url::parse(&container_url).expect("Something went wrong with URL parsing!"),
-            pipeline: BlobContainerClient::build_pipeline(credential),
+            pipeline: BlobContainerClient::build_pipeline(credential, ClientOptions::default()),
         }
     }
 
@@ -78,7 +80,7 @@ mod tests {
 
         // Get response
         let ret = my_blob_container_client.get_container_properties().await;
-        let (status_code, headers, response_body) = ret.deconstruct();
+        let (status_code, headers, _response_body) = ret.deconstruct();
 
         // Assert equality
         assert_eq!(status_code, azure_core::StatusCode::Ok);

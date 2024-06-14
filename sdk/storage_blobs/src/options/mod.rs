@@ -2,8 +2,8 @@ use azure_core::ClientOptions;
 
 #[derive(Clone, Debug)]
 pub struct BlobClientOptions {
-    api_version: Option<String>,
-    client_options: ClientOptions,
+    pub(crate) api_version: Option<String>,
+    pub(crate) client_options: ClientOptions,
 }
 
 impl BlobClientOptions {
@@ -40,6 +40,7 @@ pub mod builders {
             self
         }
 
+        // TODO: This probably isn't correct
         pub fn with_client_options(mut self, client_options: ClientOptions) -> Self {
             self.options.client_options = client_options;
             self
@@ -53,14 +54,20 @@ pub mod builders {
 
 mod tests {
     use super::*;
+    use azure_core::{FixedRetryOptions, RetryOptions};
 
     #[test]
     fn test_blob_client_options_builder() {
+        let client_options =
+            ClientOptions::default().retry(RetryOptions::fixed(FixedRetryOptions::default()));
+
         let version = "12345";
         let options = BlobClientOptions::builder()
             .with_api_version(version)
+            .with_client_options(client_options)
             .build();
 
-        assert_eq!(options.api_version, Some(version.to_string()))
+        assert_eq!(options.api_version, Some(version.to_string()));
+        // Not sure how to assert client_options because they are all private
     }
 }

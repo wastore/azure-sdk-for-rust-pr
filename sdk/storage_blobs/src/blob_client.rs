@@ -9,7 +9,6 @@ pub struct BlobClient {
     blob_name: String,
     url: Url,
     pipeline: Pipeline,
-    options: Option<BlobClientOptions>,
 }
 
 // Even just this empty block will give us access to BaseClient's traits
@@ -30,6 +29,8 @@ impl BlobClient {
             &blob_name,
         );
 
+        let options = options.unwrap_or_default();
+
         // Build our BlobClient
         Self {
             account_name: account_name,
@@ -37,8 +38,7 @@ impl BlobClient {
             container_name: container_name,
             blob_name: blob_name,
             url: Url::parse(&blob_url).expect("Something went wrong with URL parsing!"),
-            pipeline: BlobClient::build_pipeline(credential),
-            options: options.clone(),
+            pipeline: BlobClient::build_pipeline(credential, options.client_options),
         }
     }
 
@@ -117,7 +117,7 @@ mod tests {
             String::from("acontainer108f32e8"),
             String::from("hello.txt"),
             credential,
-            Some(BlobClientOptions::default()),
+            None,
         );
 
         // Get response
