@@ -1,19 +1,26 @@
-use crate::base_client::BaseClient;
+use crate::{
+    base_client::BaseClient,
+    units::{Append, BlobKind, Block, Page, Unset},
+};
 use azure_core::{auth::TokenCredential, Context, Method, Pipeline, Request, Response, Url};
-use std::sync::Arc;
-pub struct BlobClient {
+use std::{marker::PhantomData, sync::Arc};
+pub struct BlobClient<T>
+where
+    T: BlobKind,
+{
     account_name: String,
     credential: Arc<dyn TokenCredential>,
     container_name: String,
     blob_name: String,
+    blob_type: PhantomData<T>,
     url: Url,
     pipeline: Pipeline,
 }
 
 // Even just this empty block will give us access to BaseClient's traits
-impl BaseClient for BlobClient {}
+impl BaseClient for BlobClient<Unset> {}
 
-impl BlobClient {
+impl BlobClient<Unset> {
     pub fn new(
         account_name: String,
         credential: String,
@@ -36,6 +43,7 @@ impl BlobClient {
             credential: credential.clone(),
             container_name: container_name,
             blob_name: blob_name,
+            blob_type: Default::default(),
             url: Url::parse(&blob_url).expect("Something went wrong with URL parsing!"),
             pipeline: BlobClient::build_pipeline(credential),
         }
@@ -44,6 +52,10 @@ impl BlobClient {
     // This will handle appending container and blob name
     fn build_blob_url(base_url: &str, container_name: &str, blob_name: &str) -> String {
         base_url.to_owned() + container_name + "/" + blob_name
+    }
+
+    pub fn as_block_blob(self) -> BlobClient<Block> {
+        BlobClient::<Block>::new(self)
     }
 
     pub async fn download_blob(&self) -> String {
@@ -77,16 +89,73 @@ impl BlobClient {
     }
 }
 
+impl BlobClient<Block> {
+    pub fn new(client: BlobClient<Unset>) -> BlobClient<Block> {
+        // Build our BlobClient
+        Self {
+            account_name: client.account_name,
+            credential: client.credential.clone(),
+            container_name: client.container_name,
+            blob_name: client.blob_name,
+            blob_type: Default::default(),
+            url: client.url,
+            pipeline: client.pipeline,
+        }
+    }
+
+    pub fn upload_block_blob() {
+        println!("uploaded block blob")
+    }
+}
+
+// impl BlobClient<Page> {
+//     pub fn new(client: BlobClient<Unset>) -> Self {
+//         // Build our BlobClient
+//         Self {
+//             account_name: client.account_name,
+//             credential: client.credential.clone(),
+//             container_name: client.container_name,
+//             blob_name: client.blob_name,
+//             blob_type: Default::default(),
+//             url: client.url,
+//             pipeline: client.pipeline,
+//         }
+//     }
+
+//     fn upload_page_blob() {
+//         println!("uploaded page blob")
+//     }
+// }
+
+// impl BlobClient<Append> {
+//     pub fn new(client: BlobClient<Unset>) -> Self {
+//         // Build our BlobClient
+//         Self {
+//             account_name: client.account_name,
+//             credential: client.credential.clone(),
+//             container_name: client.container_name,
+//             blob_name: client.blob_name,
+//             blob_type: Default::default(),
+//             url: client.url,
+//             pipeline: client.pipeline,
+//         }
+//     }
+
+//     pub fn upload_append_blob() {
+//         println!("uploaded append blob")
+//     }
+// }
+
 #[cfg(test)]
 mod tests {
     use azure_core::headers::HeaderName;
 
-    use crate::BlobClient;
+    use crate::{units::Unset, BlobClient};
 
     #[tokio::test]
     async fn test_download_blob() {
         // Create a Blob Client
-        let my_blob_client = BlobClient::new(
+        let my_blob_client = BlobClient::<Unset>::new(
             "vincenttranstock".to_string(),
             "throwaway".to_string(),
             "acontainer108f32e8".to_string(),
@@ -100,7 +169,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_blob_properties() {
         // Create a Blob Client
-        let my_blob_client = BlobClient::new(
+        let my_blob_client = BlobClient::<Unset>::new(
             "vincenttranstock".to_string(),
             "throwaway".to_string(),
             "acontainer108f32e8".to_string(),
@@ -119,5 +188,19 @@ mod tests {
                 .expect("Failed getting content-length header"),
             "10"
         )
+    }
+
+    #[tokio::test]
+    async fn test_blob_types() {
+        // Create a Blob Client
+        let my_blob_client = BlobClient::<Unset>::new(
+            "vincenttranstock".to_string(),
+            "throwaway".to_string(),
+            "acontainer108f32e8".to_string(),
+            "hello.txt".to_string(),
+        );
+
+        let block_blob_client = my_blob_client.as_block_blob();
+        block_blob_client.upload_block_blob()
     }
 }
