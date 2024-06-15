@@ -1,5 +1,8 @@
 use crate::{base_client::BaseClient, BlobClientOptions};
-use azure_core::{auth::TokenCredential, Context, Method, Pipeline, Request, Response, Url};
+use azure_core::{
+    auth::TokenCredential, Context, Method, Pipeline, Request, Response, Result, Url,
+};
+use bytes::Bytes;
 use std::sync::Arc;
 
 pub struct BlobClient {
@@ -47,34 +50,34 @@ impl BlobClient {
         base_url.to_owned() + container_name + "/" + blob_name
     }
 
-    pub async fn download_blob(&self) -> String {
+    pub async fn download_blob(&self) -> Result<Bytes> {
         // Build the download request itself
         let mut request = Request::new(self.url.to_owned(), Method::Get); // This is technically cloning
         BlobClient::finalize_request(&mut request);
 
         // Send the request
-        let response = self.pipeline.send(&(Context::new()), &mut request).await;
+        let response = self.pipeline.send(&(Context::new()), &mut request).await?;
         println!("Response headers: {:?}", response);
 
         // Look at request body
-        let response_body = response.unwrap().into_body().collect_string().await;
+        let response_body = response.into_body().collect().await?;
         println!("Response body: {:?}", response_body);
 
         // Return the body
-        response_body.unwrap()
+        Ok(response_body)
     }
 
-    pub async fn get_blob_properties(&self) -> Response {
+    pub async fn get_blob_properties(&self) -> Result<Response> {
         // Build the get properties request itself
         let mut request = Request::new(self.url.to_owned(), Method::Head); // This is technically cloning
         BlobClient::finalize_request(&mut request);
 
         // Send the request
-        let response = self.pipeline.send(&(Context::new()), &mut request).await;
+        let response = self.pipeline.send(&(Context::new()), &mut request).await?;
         println!("Response headers: {:?}", response);
 
-        // Return the response headers
-        response.unwrap()
+        // Return the entire response for now
+        Ok(response)
     }
 }
 
@@ -99,9 +102,13 @@ mod tests {
             credential,
             Some(BlobClientOptions::default()),
         );
+        let result = my_blob_client
+            .download_blob()
+            .await
+            .expect("Request failed!");
 
         // Assert equality
-        assert_eq!(my_blob_client.download_blob().await, "rustaceans")
+        assert_eq!(result, b"rustaceans"[..])
     }
 
     #[tokio::test]
@@ -121,7 +128,10 @@ mod tests {
         );
 
         // Get response
-        let ret = my_blob_client.get_blob_properties().await;
+        let ret = my_blob_client
+            .get_blob_properties()
+            .await
+            .expect("Request failed!");
         let (status_code, headers, _response_body) = ret.deconstruct();
 
         // Assert equality
