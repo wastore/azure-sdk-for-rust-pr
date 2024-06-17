@@ -5,19 +5,24 @@ use azure_core::{
 use bytes::Bytes;
 use std::sync::Arc;
 
-pub struct BlobClient {
+// region: --- States
+pub struct Unset;
+pub struct Block;
+// endregion: --- States
+pub struct BlobClient<T> {
     account_name: String,
     credential: Arc<dyn TokenCredential>,
     container_name: String,
     blob_name: String,
     url: Url,
     pipeline: Pipeline,
+    state: T,
 }
 
 // Even just this empty block will give us access to BaseClient's traits
-impl BaseClient for BlobClient {}
+impl<T> BaseClient for BlobClient<T> {}
 
-impl BlobClient {
+impl BlobClient<Unset> {
     pub fn new(
         account_name: String,
         container_name: String,
@@ -26,8 +31,8 @@ impl BlobClient {
         options: Option<BlobClientOptions>,
     ) -> Self {
         // Build BlobClient-specific URL
-        let blob_url = BlobClient::build_blob_url(
-            &BlobClient::build_url(&account_name, "blob"),
+        let blob_url = BlobClient::<Unset>::build_blob_url(
+            &BlobClient::<Unset>::build_url(&account_name, "blob"),
             &container_name,
             &blob_name,
         );
@@ -41,7 +46,20 @@ impl BlobClient {
             container_name: container_name,
             blob_name: blob_name,
             url: Url::parse(&blob_url).expect("Something went wrong with URL parsing!"),
-            pipeline: BlobClient::build_pipeline(credential, options.client_options),
+            pipeline: BlobClient::<Unset>::build_pipeline(credential, options.client_options),
+            state: Unset,
+        }
+    }
+
+    fn as_block_blob(self) -> BlobClient<Block> {
+        BlobClient {
+            account_name: self.account_name,
+            credential: self.credential,
+            container_name: self.container_name,
+            blob_name: self.blob_name,
+            url: self.url,
+            pipeline: self.pipeline,
+            state: Block,
         }
     }
 
@@ -49,11 +67,13 @@ impl BlobClient {
     fn build_blob_url(base_url: &str, container_name: &str, blob_name: &str) -> String {
         base_url.to_owned() + container_name + "/" + blob_name
     }
+}
 
+impl<T> BlobClient<T> {
     pub async fn download_blob(&self) -> Result<Bytes> {
         // Build the download request itself
         let mut request = Request::new(self.url.to_owned(), Method::Get); // This is technically cloning
-        BlobClient::finalize_request(&mut request);
+        BlobClient::<T>::finalize_request(&mut request);
 
         // Send the request
         let response = self.pipeline.send(&(Context::new()), &mut request).await?;
@@ -70,7 +90,7 @@ impl BlobClient {
     pub async fn get_blob_properties(&self) -> Result<Response> {
         // Build the get properties request itself
         let mut request = Request::new(self.url.to_owned(), Method::Head); // This is technically cloning
-        BlobClient::finalize_request(&mut request);
+        BlobClient::<T>::finalize_request(&mut request);
 
         // Send the request
         let response = self.pipeline.send(&(Context::new()), &mut request).await?;
@@ -78,6 +98,12 @@ impl BlobClient {
 
         // Return the entire response for now
         Ok(response)
+    }
+}
+
+impl BlobClient<Block> {
+    fn download_as_block_blob(self) {
+        println!("Blocked.")
     }
 }
 
@@ -142,5 +168,28 @@ mod tests {
                 .expect("Failed getting content-length header"),
             "10"
         )
+    }
+
+    #[tokio::test]
+    async fn test_blob_types() {
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
+        // Create a Blob Client
+        let my_blob_client = BlobClient::new(
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            String::from("hello.txt"),
+            credential,
+            Some(BlobClientOptions::default()),
+        );
+
+        // Get Block Blob Client
+        let block_blob_client = my_blob_client.as_block_blob();
+
+        // Use Block Blob Client
+        block_blob_client.download_as_block_blob()
     }
 }
