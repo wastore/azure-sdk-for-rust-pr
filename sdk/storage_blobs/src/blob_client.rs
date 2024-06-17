@@ -1,15 +1,15 @@
-use crate::{base_client::BaseClient, BlobClientOptions};
+use crate::{
+    base_client::BaseClient,
+    units::{Append, BlobKind, Block, Page, Unset},
+    BlobClientOptions,
+};
 use azure_core::{
     auth::TokenCredential, Context, Method, Pipeline, Request, Response, Result, Url,
 };
 use bytes::Bytes;
 use std::sync::Arc;
 
-// region: --- States
-pub struct Unset;
-pub struct Block;
-// endregion: --- States
-pub struct BlobClient<T> {
+pub struct BlobClient<T: BlobKind> {
     account_name: String,
     credential: Arc<dyn TokenCredential>,
     container_name: String,
@@ -20,7 +20,7 @@ pub struct BlobClient<T> {
 }
 
 // Even just this empty block will give us access to BaseClient's traits
-impl<T> BaseClient for BlobClient<T> {}
+impl<T: BlobKind> BaseClient for BlobClient<T> {}
 
 impl BlobClient<Unset> {
     pub fn new(
@@ -51,6 +51,7 @@ impl BlobClient<Unset> {
         }
     }
 
+    // We can make this alot better by adding the Default implements
     fn as_block_blob(self) -> BlobClient<Block> {
         BlobClient {
             account_name: self.account_name,
@@ -63,13 +64,37 @@ impl BlobClient<Unset> {
         }
     }
 
+    fn as_page_blob(self) -> BlobClient<Page> {
+        BlobClient {
+            account_name: self.account_name,
+            credential: self.credential,
+            container_name: self.container_name,
+            blob_name: self.blob_name,
+            url: self.url,
+            pipeline: self.pipeline,
+            state: Page,
+        }
+    }
+
+    fn as_append_blob(self) -> BlobClient<Append> {
+        BlobClient {
+            account_name: self.account_name,
+            credential: self.credential,
+            container_name: self.container_name,
+            blob_name: self.blob_name,
+            url: self.url,
+            pipeline: self.pipeline,
+            state: Append,
+        }
+    }
+
     // This will handle appending container and blob name
     fn build_blob_url(base_url: &str, container_name: &str, blob_name: &str) -> String {
         base_url.to_owned() + container_name + "/" + blob_name
     }
 }
 
-impl<T> BlobClient<T> {
+impl<T: BlobKind> BlobClient<T> {
     pub async fn download_blob(&self) -> Result<Bytes> {
         // Build the download request itself
         let mut request = Request::new(self.url.to_owned(), Method::Get); // This is technically cloning
@@ -102,8 +127,22 @@ impl<T> BlobClient<T> {
 }
 
 impl BlobClient<Block> {
-    fn download_as_block_blob(self) {
-        println!("Blocked.")
+    fn upload_block_blob(&self) {
+        println!("block")
+    }
+}
+
+// Probably need to append ?comp=appendblock
+impl BlobClient<Append> {
+    fn upload_append_blob(&self) {
+        println!("append")
+    }
+}
+
+// Probably need to append ?comp=page
+impl BlobClient<Page> {
+    fn upload_page_blob(&self) {
+        println!("page")
     }
 }
 
@@ -171,7 +210,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_blob_types() {
+    async fn test_block_blob() {
         let credential = DefaultAzureCredentialBuilder::default()
             .build()
             .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
@@ -186,10 +225,47 @@ mod tests {
             Some(BlobClientOptions::default()),
         );
 
-        // Get Block Blob Client
-        let block_blob_client = my_blob_client.as_block_blob();
+        let block_blob = my_blob_client.as_block_blob();
+        block_blob.upload_block_blob()
+    }
 
-        // Use Block Blob Client
-        block_blob_client.download_as_block_blob()
+    #[tokio::test]
+    async fn test_append_blob() {
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
+        // Create a Blob Client
+        let my_blob_client = BlobClient::new(
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            String::from("hello.txt"),
+            credential,
+            Some(BlobClientOptions::default()),
+        );
+
+        let append_blob = my_blob_client.as_append_blob();
+        append_blob.upload_append_blob()
+    }
+
+    #[tokio::test]
+    async fn test_page_blob() {
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
+        // Create a Blob Client
+        let my_blob_client = BlobClient::new(
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            String::from("hello.txt"),
+            credential,
+            Some(BlobClientOptions::default()),
+        );
+
+        let page_blob = my_blob_client.as_page_blob();
+        page_blob.upload_page_blob()
     }
 }
