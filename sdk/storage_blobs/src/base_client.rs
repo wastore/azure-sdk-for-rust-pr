@@ -2,26 +2,19 @@ use azure_core::{
     auth::TokenCredential, policies::BearerTokenCredentialPolicy, ClientOptions, Pipeline, Policy,
     Request,
 };
-use azure_identity::create_credential;
 use std::sync::Arc;
 
 pub(crate) trait BaseClient {
-    fn get_credential() -> Arc<dyn TokenCredential> {
-        let credential = create_credential().expect("Failed for some reason?");
-        credential
-    }
-
-    fn build_pipeline(credential: Arc<dyn TokenCredential>) -> Pipeline {
+    fn build_pipeline(credential: Arc<dyn TokenCredential>, options: ClientOptions) -> Pipeline {
         let oauth_token_policy =
             BearerTokenCredentialPolicy::new(credential, &["https://storage.azure.com/.default"]);
-        let pipeline = Pipeline::new(
+        Pipeline::new(
             option_env!("CARGO_PKG_NAME"),
             option_env!("CARGO_PKG_VERSION"),
-            ClientOptions::default(),
+            options,
             vec![Arc::new(oauth_token_policy) as Arc<dyn Policy>],
             Vec::new(),
-        );
-        pipeline
+        )
     }
 
     fn build_url(account_name: &str, service: &str) -> String {
