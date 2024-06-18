@@ -4,10 +4,11 @@ use crate::{
     BlobClientOptions,
 };
 use azure_core::{
-    auth::TokenCredential, Context, Method, Pipeline, Request, Response, Result, Url,
+    auth::TokenCredential, date, Body, Context, Method, Pipeline, Request, Response, Result, Url,
 };
 use bytes::Bytes;
 use std::sync::Arc;
+use time::OffsetDateTime;
 
 pub struct BlobClient<T: BlobKind> {
     account_name: String,
@@ -64,18 +65,6 @@ impl BlobClient<Unset> {
         }
     }
 
-    fn as_page_blob(self) -> BlobClient<Page> {
-        BlobClient {
-            account_name: self.account_name,
-            credential: self.credential,
-            container_name: self.container_name,
-            blob_name: self.blob_name,
-            url: self.url,
-            pipeline: self.pipeline,
-            state: Page,
-        }
-    }
-
     fn as_append_blob(self) -> BlobClient<Append> {
         BlobClient {
             account_name: self.account_name,
@@ -88,6 +77,18 @@ impl BlobClient<Unset> {
         }
     }
 
+    fn as_page_blob(self) -> BlobClient<Page> {
+        BlobClient {
+            account_name: self.account_name,
+            credential: self.credential,
+            container_name: self.container_name,
+            blob_name: self.blob_name,
+            url: self.url,
+            pipeline: self.pipeline,
+            state: Page,
+        }
+    }
+
     // This will handle appending container and blob name
     fn build_blob_url(base_url: &str, container_name: &str, blob_name: &str) -> String {
         base_url.to_owned() + container_name + "/" + blob_name
@@ -95,6 +96,38 @@ impl BlobClient<Unset> {
 }
 
 impl<T: BlobKind> BlobClient<T> {
+    pub async fn upload_blob(&self, data: Bytes, blob_type: Option<String>) -> Result<Response> {
+        // Build the upload properties request itself
+        let mut request = Request::new(self.url.to_owned(), Method::Put); // This is technically cloning
+
+        // This will be better when we can use an Enum or something
+        match blob_type {
+            Some(b) => {
+                if ["BlockBlob", "PageBlob", "AppendBlob"].contains(&b.as_str()) {
+                    request.insert_header("x-ms-blob-type", b)
+                } else {
+                    request.insert_header("x-ms-blob-type", "BlockBlob")
+                }
+            }
+            None => request.insert_header("x-ms-blob-type", "BlockBlob"),
+        }
+        let dt = OffsetDateTime::now_utc();
+        let time = date::to_rfc1123(&dt);
+        request.insert_header("content-length", data.len().to_string());
+        request.insert_header("x-ms-date", time);
+
+        request.set_body(Body::from(data));
+
+        BlobClient::<T>::finalize_request(&mut request);
+
+        // Send the request
+        let response = self.pipeline.send(&(Context::new()), &mut request).await?;
+        println!("Response headers: {:?}", response);
+
+        // Return the entire response for now
+        Ok(response)
+    }
+
     pub async fn download_blob(&self) -> Result<Bytes> {
         // Build the download request itself
         let mut request = Request::new(self.url.to_owned(), Method::Get); // This is technically cloning
@@ -151,6 +184,56 @@ mod tests {
     use super::*;
     use azure_core::headers::HeaderName;
     use azure_identity::DefaultAzureCredentialBuilder;
+
+    #[tokio::test]
+    async fn test_upload_blob() {
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
+        // Create a Blob Client
+        let my_blob_client = BlobClient::new(
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            String::from("testupload.txt"),
+            credential,
+            Some(BlobClientOptions::default()),
+        );
+        let result = my_blob_client
+            .upload_blob(
+                Bytes::from_static(b"hello world"),
+                Some("BlockBlob".to_string()),
+            )
+            .await
+            .expect("Request failed!");
+        let (status_code, _headers, _response_body) = result.deconstruct();
+        // Assert upload
+        assert_eq!(status_code, azure_core::StatusCode::Created);
+
+        // Get response
+        let blob_properties_ret: Response = my_blob_client
+            .get_blob_properties()
+            .await
+            .expect("Request failed!");
+        let (status_code, headers, response_body) = blob_properties_ret.deconstruct();
+        println!("{:?}", headers);
+
+        // Assert blob properties
+        assert_eq!(status_code, azure_core::StatusCode::Ok);
+        assert_eq!(
+            headers
+                .get_str(&HeaderName::from_static("content-length"))
+                .expect("Failed getting content-length header"),
+            "11"
+        );
+        assert_eq!(
+            headers
+                .get_str(&HeaderName::from_static("x-ms-blob-type"))
+                .expect("Failed getting content-length header"),
+            "BlockBlob"
+        );
+    }
 
     #[tokio::test]
     async fn test_download_blob() {
