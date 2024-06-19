@@ -4,9 +4,11 @@ use crate::{
     BlobClientOptions,
 };
 use azure_core::{
-    auth::TokenCredential, date, Body, Context, Method, Pipeline, Request, Response, Result, Url,
+    auth::TokenCredential, date, Body, Context, Error, Method, Pipeline, Request, Response, Result,
+    Url,
 };
 use bytes::Bytes;
+use core::panic;
 use std::sync::Arc;
 use time::OffsetDateTime;
 
@@ -96,27 +98,40 @@ impl BlobClient<Unset> {
 }
 
 impl<T: BlobKind> BlobClient<T> {
-    pub async fn upload_blob(&self, data: Bytes, blob_type: Option<String>) -> Result<Response> {
+    pub async fn upload_blob(&self, data: Bytes, blob_type: Option<&str>) -> Result<Response> {
         // Build the upload properties request itself
         let mut request = Request::new(self.url.to_owned(), Method::Put); // This is technically cloning
 
-        // This will be better when we can use an Enum or something
         match blob_type {
-            Some(b) => {
-                if ["BlockBlob", "PageBlob", "AppendBlob"].contains(&b.as_str()) {
-                    request.insert_header("x-ms-blob-type", b)
-                } else {
-                    request.insert_header("x-ms-blob-type", "BlockBlob")
-                }
+            Some("PageBlob") => {
+                request.insert_header("x-ms-blob-type", "PageBlob");
+                request.insert_header("content-length", "0");
+                request.insert_header("x-ms-blob-content-length", data.len().to_string());
+                request.set_body(Body::from(data));
             }
-            None => request.insert_header("x-ms-blob-type", "BlockBlob"),
+            // For now we are only going to support empty AppendBlob since figuring out the headers is out of scope
+            Some("AppendBlob") => {
+                request.insert_header("x-ms-blob-type", "AppendBlob");
+                request.insert_header("content-length", "0");
+            }
+            Some("BlockBlob") => {
+                request.insert_header("x-ms-blob-type", "BlockBlob");
+                request.insert_header("content-length", data.len().to_string());
+                request.set_body(Body::from(data));
+            }
+            Some(_) => {
+                panic!("Unknown blob type specified!")
+            }
+            None => {
+                request.insert_header("x-ms-blob-type", "BlockBlob");
+                request.insert_header("content-length", data.len().to_string());
+                request.set_body(Body::from(data));
+            }
         }
+
         let dt = OffsetDateTime::now_utc();
         let time = date::to_rfc1123(&dt);
-        request.insert_header("content-length", data.len().to_string());
         request.insert_header("x-ms-date", time);
-
-        request.set_body(Body::from(data));
 
         BlobClient::<T>::finalize_request(&mut request);
 
@@ -160,22 +175,28 @@ impl<T: BlobKind> BlobClient<T> {
 }
 
 impl BlobClient<Block> {
-    fn upload_block_blob(&self) {
-        println!("block")
+    async fn upload_block_blob(&self, data: Bytes) -> Result<Response> {
+        self.upload_blob(data, Some("BlockBlob")).await
     }
 }
 
-// Probably need to append ?comp=appendblock
 impl BlobClient<Append> {
-    fn upload_append_blob(&self) {
-        println!("append")
+    async fn upload_append_blob(&self, data: Bytes) -> Result<Response> {
+        self.upload_blob(data, Some("AppendBlob")).await
     }
 }
 
-// Probably need to append ?comp=page
 impl BlobClient<Page> {
-    fn upload_page_blob(&self) {
-        println!("page")
+    async fn upload_page_blob(&self, data: Bytes) -> Result<Response> {
+        let data_length = data.len();
+        if data_length % 512 != 0 {
+            panic!(
+                "Data length is not divisible by 512. Data len:{}",
+                data_length
+            );
+        } else {
+            self.upload_blob(data, Some("PageBlob")).await
+        }
     }
 }
 
@@ -201,10 +222,7 @@ mod tests {
             Some(BlobClientOptions::default()),
         );
         let result = my_blob_client
-            .upload_blob(
-                Bytes::from_static(b"hello world"),
-                Some("BlockBlob".to_string()),
-            )
+            .upload_blob(Bytes::from_static(b"hello world"), Some("BlockBlob"))
             .await
             .expect("Request failed!");
         let (status_code, _headers, _response_body) = result.deconstruct();
@@ -232,6 +250,108 @@ mod tests {
                 .get_str(&HeaderName::from_static("x-ms-blob-type"))
                 .expect("Failed getting content-length header"),
             "BlockBlob"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_upload_page_blob() {
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
+        // Create a Blob Client
+        let my_blob_client = BlobClient::new(
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            String::from("pageblob.txt"),
+            credential,
+            Some(BlobClientOptions::default()),
+        );
+
+        // Get Certain Type of Blob Client
+        let page_blob_client = my_blob_client.as_page_blob();
+        let result = page_blob_client
+            .upload_page_blob(
+                Bytes::from_static(b"hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello world hello wo"),
+            )
+            .await
+            .expect("Request failed!");
+        let (status_code, _headers, _response_body) = result.deconstruct();
+        // Assert upload
+        assert_eq!(status_code, azure_core::StatusCode::Created);
+
+        // Get response
+        let blob_properties_ret: Response = page_blob_client
+            .get_blob_properties()
+            .await
+            .expect("Request failed!");
+        let (status_code, headers, response_body) = blob_properties_ret.deconstruct();
+        println!("{:?}", headers);
+
+        // Assert blob properties
+        assert_eq!(status_code, azure_core::StatusCode::Ok);
+        assert_eq!(
+            headers
+                .get_str(&HeaderName::from_static("content-length"))
+                .expect("Failed getting content-length header"),
+            "512"
+        );
+        assert_eq!(
+            headers
+                .get_str(&HeaderName::from_static("x-ms-blob-type"))
+                .expect("Failed getting content-length header"),
+            "PageBlob"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_upload_append_blob() {
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
+        // Create a Blob Client
+        let my_blob_client = BlobClient::new(
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            String::from("appendblob.txt"),
+            credential,
+            Some(BlobClientOptions::default()),
+        );
+
+        // Get Certain Type of Blob Client
+        let append_blob_client = my_blob_client.as_append_blob();
+        let result = append_blob_client
+            .upload_append_blob(Bytes::from_static(b"throwaway anyway"))
+            .await
+            .expect("Request failed!");
+        let (status_code, _headers, _response_body) = result.deconstruct();
+        // Assert upload
+        assert_eq!(status_code, azure_core::StatusCode::Created);
+
+        // Get response
+        let blob_properties_ret: Response = append_blob_client
+            .get_blob_properties()
+            .await
+            .expect("Request failed!");
+        let (status_code, headers, response_body) = blob_properties_ret.deconstruct();
+        println!("{:?}", headers);
+
+        // Assert blob properties
+        assert_eq!(status_code, azure_core::StatusCode::Ok);
+        assert_eq!(
+            headers
+                .get_str(&HeaderName::from_static("content-length"))
+                .expect("Failed getting content-length header"),
+            "0"
+        );
+        assert_eq!(
+            headers
+                .get_str(&HeaderName::from_static("x-ms-blob-type"))
+                .expect("Failed getting content-length header"),
+            "AppendBlob"
         );
     }
 
@@ -290,65 +410,5 @@ mod tests {
                 .expect("Failed getting content-length header"),
             "10"
         )
-    }
-
-    #[tokio::test]
-    async fn test_block_blob() {
-        let credential = DefaultAzureCredentialBuilder::default()
-            .build()
-            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
-            .expect("Failed to build credential");
-
-        // Create a Blob Client
-        let my_blob_client = BlobClient::new(
-            String::from("vincenttranstock"),
-            String::from("acontainer108f32e8"),
-            String::from("hello.txt"),
-            credential,
-            Some(BlobClientOptions::default()),
-        );
-
-        let block_blob = my_blob_client.as_block_blob();
-        block_blob.upload_block_blob()
-    }
-
-    #[tokio::test]
-    async fn test_append_blob() {
-        let credential = DefaultAzureCredentialBuilder::default()
-            .build()
-            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
-            .expect("Failed to build credential");
-
-        // Create a Blob Client
-        let my_blob_client = BlobClient::new(
-            String::from("vincenttranstock"),
-            String::from("acontainer108f32e8"),
-            String::from("hello.txt"),
-            credential,
-            Some(BlobClientOptions::default()),
-        );
-
-        let append_blob = my_blob_client.as_append_blob();
-        append_blob.upload_append_blob()
-    }
-
-    #[tokio::test]
-    async fn test_page_blob() {
-        let credential = DefaultAzureCredentialBuilder::default()
-            .build()
-            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
-            .expect("Failed to build credential");
-
-        // Create a Blob Client
-        let my_blob_client = BlobClient::new(
-            String::from("vincenttranstock"),
-            String::from("acontainer108f32e8"),
-            String::from("hello.txt"),
-            credential,
-            Some(BlobClientOptions::default()),
-        );
-
-        let page_blob = my_blob_client.as_page_blob();
-        page_blob.upload_page_blob()
     }
 }
