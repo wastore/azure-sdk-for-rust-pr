@@ -7,7 +7,7 @@ use std::sync::Arc;
 pub(crate) trait BaseClient {
     fn build_pipeline(credential: Arc<dyn TokenCredential>, options: ClientOptions) -> Pipeline {
         let oauth_token_policy =
-            BearerTokenCredentialPolicy::new(credential, &["https://storage.azure.com/.default"]);
+            BearerTokenCredentialPolicy::new(credential, ["https://storage.azure.com/.default"]);
         Pipeline::new(
             option_env!("CARGO_PKG_NAME"),
             option_env!("CARGO_PKG_VERSION"),

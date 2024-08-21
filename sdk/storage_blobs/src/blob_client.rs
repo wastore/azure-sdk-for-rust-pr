@@ -10,6 +10,8 @@ use azure_core::{
 use bytes::Bytes;
 use core::panic;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 use time::OffsetDateTime;
 
 pub struct BlobClient<T: BlobKind> {
@@ -167,7 +169,7 @@ impl<T: BlobKind> BlobClient<T> {
 
         // Send the request
         let response = self.pipeline.send(&(Context::new()), &mut request).await?;
-        println!("Response headers: {:?}", response);
+        // println!("Response headers: {:?}", response);
 
         // Return the entire response for now
         Ok(response)
@@ -394,6 +396,59 @@ mod tests {
             credential,
             None,
         );
+
+        // Get response
+        let ret = my_blob_client
+            .get_blob_properties()
+            .await
+            .expect("Request failed!");
+        let (status_code, headers, _response_body) = ret.deconstruct();
+
+        // Assert equality
+        assert_eq!(status_code, azure_core::StatusCode::Ok);
+        assert_eq!(
+            headers
+                .get_str(&HeaderName::from_static("content-length"))
+                .expect("Failed getting content-length header"),
+            "10"
+        )
+    }
+
+    #[tokio::test]
+    async fn test_token_refresh() {
+        // Get credential
+        let credential = DefaultAzureCredentialBuilder::default()
+            .build()
+            .map(|cred| Arc::new(cred) as Arc<dyn TokenCredential>)
+            .expect("Failed to build credential");
+
+        // Create a Blob Client
+        let my_blob_client = BlobClient::new(
+            String::from("vincenttranstock"),
+            String::from("acontainer108f32e8"),
+            String::from("hello.txt"),
+            credential,
+            None,
+        );
+
+        // Get response
+        let ret = my_blob_client
+            .get_blob_properties()
+            .await
+            .expect("Request failed!");
+        let (status_code, headers, _response_body) = ret.deconstruct();
+
+        // Assert equality
+        assert_eq!(status_code, azure_core::StatusCode::Ok);
+        assert_eq!(
+            headers
+                .get_str(&HeaderName::from_static("content-length"))
+                .expect("Failed getting content-length header"),
+            "10"
+        );
+
+        // Sleep for 11 seconds (should need to refresh)
+        thread::sleep(Duration::from_secs(11));
 
         // Get response
         let ret = my_blob_client
